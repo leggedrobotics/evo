@@ -412,6 +412,41 @@ def traj(ax: Axes, plot_mode: PlotMode, traj: trajectory.PosePath3D,
         add_start_end_markers(ax, plot_mode, traj, start_color=color,
                               end_color=color, alpha=alpha)
 
+def traj_scatter(ax: Axes, plot_mode: PlotMode, traj: trajectory.PosePath3D,
+         marker: str = 'o', color='black', label: str = "", alpha: float = 1.0,
+         plot_start_end_markers: bool = False) -> None:
+    """
+    Plot a path/trajectory based on xyz coordinates into an axis using a scatter plot.
+    
+    :param ax: The matplotlib axis.
+    :param plot_mode: PlotMode (xy or xyz).
+    :param traj: trajectory.PosePath3D or trajectory.PoseTrajectory3D object.
+    :param marker: Marker style for scatter points (default is 'o').
+    :param color: matplotlib color.
+    :param label: Label (for legend).
+    :param alpha: Alpha value for transparency.
+    :param plot_start_end_markers: Mark the start and end of a trajectory
+                                   with a symbol.
+    """
+    x_idx, y_idx, z_idx = plot_mode_to_idx(plot_mode)
+    x = traj.positions_xyz[:, x_idx]
+    y = traj.positions_xyz[:, y_idx]
+    
+    if plot_mode == PlotMode.xyz:
+        z = traj.positions_xyz[:, z_idx]
+        ax.scatter(x, y, z, marker=marker, color=color, label=label, alpha=alpha)
+    else:
+        ax.scatter(x, y, marker=marker, color=color, label=label, alpha=alpha)
+    
+    if SETTINGS.plot_xyz_realistic:
+        set_aspect_equal(ax)
+    if label and SETTINGS.plot_show_legend:
+        ax.legend(frameon=True)
+    if plot_start_end_markers:
+        add_start_end_markers(ax, plot_mode, traj, start_color=color,
+                              end_color=color, alpha=alpha)
+
+
 
 def colored_line_collection(
     xyz: np.ndarray, colors, plot_mode: PlotMode = PlotMode.xy,
@@ -439,6 +474,104 @@ def colored_line_collection(
                                          linestyle=linestyles)
     return line_collection
 
+def custom_colored_line_collection(
+    xyz: np.ndarray,
+    colors,
+    plot_mode: PlotMode = PlotMode.xy,
+    linestyles: str = "solid",
+    step: int = 1,
+    alpha: float = 1.0,
+    motion_thresh: float = 1.0,
+) -> typing.Union[LineCollection, art3d.Line3DCollection]:
+    step = 1
+    if step > 1 and len(xyz) / step != len(colors):
+        raise PlotException(
+            "color values don't have correct length: %d vs. %d"
+            % (len(xyz) / step, len(colors))
+        )
+    x_idx, y_idx, z_idx = plot_mode_to_idx(plot_mode)
+    xs = [[x_1, x_2]
+          for x_1, x_2 in zip(xyz[:-1:step, x_idx], xyz[1::step, x_idx])]
+    ys = [[x_1, x_2]
+          for x_1, x_2 in zip(xyz[:-1:step, y_idx], xyz[1::step, y_idx])]
+
+    if plot_mode == PlotMode.xyz:
+        zs = [[x_1, x_2]
+              for x_1, x_2 in zip(xyz[:-1:step, z_idx], xyz[1::step, z_idx])]
+        segs_3d = []
+        filtered_colors = []
+        for x, y, z, color in zip(xs, ys, zs, colors):
+            if motion_thresh is not None:
+                # Calculate the motion vector norm
+                motion_norm = np.linalg.norm([x[1] - x[0], y[1] - y[0], z[1] - z[0]])
+                if motion_norm > motion_thresh:
+                    continue  # Skip this segment
+            segs_3d.append(list(zip(x, y, z)))
+            filtered_colors.append(color)
+        print("line_collection = art3d.Line3DCollection")
+        line_collection = art3d.Line3DCollection(segs_3d, colors=filtered_colors,
+                                                 alpha=1.0, linestyles="solid")
+    else:
+        print("PlotMode.xy")
+        segs_2d = [list(zip(x, y)) for x, y in zip(xs, ys)]
+        line_collection = LineCollection(segs_2d, colors=colors, alpha=alpha,
+                                         linestyle=linestyles)
+    return line_collection
+
+def custom_traj_colormap(ax: Axes, traj: trajectory.PosePath3D, array: ListOrArray,
+                  plot_mode: PlotMode, min_map: float, max_map: float,
+                  title: str = "",
+                  fig: typing.Optional[mpl.figure.Figure] = None,
+                  plot_start_end_markers: bool = False,
+                  motion_threshold: float = 1.0) -> None:
+    """
+    color map a path/trajectory in xyz coordinates according to
+    an array of values
+    :param ax: plot axis
+    :param traj: trajectory.PosePath3D or trajectory.PoseTrajectory3D object
+    :param array: Nx1 array of values used for color mapping
+    :param plot_mode: PlotMode
+    :param min_map: lower bound value for color mapping
+    :param max_map: upper bound value for color mapping
+    :param title: plot title
+    :param fig: plot figure. Obtained with plt.gcf() if none is specified
+    :param plot_start_end_markers: Mark the start and end of a trajectory
+                                   with a symbol.
+    """
+    pos = traj.positions_xyz
+    norm = mpl.colors.Normalize(vmin=min_map, vmax=max_map, clip=True)
+    mapper = cm.ScalarMappable(
+        norm=norm,
+        cmap=SETTINGS.plot_trajectory_cmap)  # cm.*_r is reversed cmap
+    mapper.set_array(array)
+    # TODO: why does mypy complain about 'a' here, float is fine?
+    colors = [mapper.to_rgba(a) for a in array]  # type: ignore[arg-type]
+    line_collection = custom_colored_line_collection(pos, colors, plot_mode, linestyles= "solid", step= 1, alpha = 1.0,  motion_thresh = motion_threshold)
+    ax.add_collection(line_collection)
+    ax.autoscale_view(True, True, True)
+    if plot_mode == PlotMode.xyz and isinstance(ax, Axes3D):
+        min_z = np.amin(traj.positions_xyz[:, 2])
+        max_z = np.amax(traj.positions_xyz[:, 2])
+        # Only adjust limits if there are z values to suppress mpl warning.
+        if min_z != max_z:
+            ax.set_zlim(min_z, max_z)
+    if SETTINGS.plot_xyz_realistic:
+        set_aspect_equal(ax)
+    if fig is None:
+        fig = plt.gcf()
+    cbar = fig.colorbar(
+        mapper, ticks=[min_map, (max_map - (max_map - min_map) / 2), max_map],
+        ax=ax)
+    cbar.ax.set_yticklabels([
+        "{0:0.3f}".format(min_map),
+        "{0:0.3f}".format(max_map - (max_map - min_map) / 2),
+        "{0:0.3f}".format(max_map)
+    ])
+    if title:
+        ax.legend(frameon=True)
+        ax.set_title(title)
+    if plot_start_end_markers:
+        add_start_end_markers(ax, plot_mode, traj, start_color=colors[0], end_color=colors[-1])
 
 def traj_colormap(ax: Axes, traj: trajectory.PosePath3D, array: ListOrArray,
                   plot_mode: PlotMode, min_map: float, max_map: float,

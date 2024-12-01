@@ -79,22 +79,27 @@ def associate_trajectories(
     :param snd_name: name of second trajectory for verbose/debug logging
     :return: traj_1, traj_2 (synchronized)
     """
-    if not isinstance(traj_1, PoseTrajectory3D) \
-        or not isinstance(traj_2, PoseTrajectory3D):
+    if not isinstance(traj_1, PoseTrajectory3D) or not isinstance(traj_2, PoseTrajectory3D):
         raise SyncException("trajectories must be PoseTrajectory3D objects")
 
+    # Figure out which one is longer
     snd_longer = len(traj_2.timestamps) > len(traj_1.timestamps)
     traj_long = copy.deepcopy(traj_2) if snd_longer else copy.deepcopy(traj_1)
     traj_short = copy.deepcopy(traj_1) if snd_longer else copy.deepcopy(traj_2)
+    
+    # 1-to-1 matching
     max_pairs = len(traj_short.timestamps)
 
     matching_indices_short, matching_indices_long = matching_time_indices(
         traj_short.timestamps, traj_long.timestamps, max_diff,
         offset_2 if snd_longer else -offset_2)
+    
     if len(matching_indices_short) != len(matching_indices_long):
-        raise SyncException(
-            "matching_time_indices returned unequal number of indices")
+        raise SyncException("matching_time_indices returned unequal number of indices")
+    
     num_matches = len(matching_indices_long)
+
+    # Retrieve Matched traj.
     traj_short.reduce_to_ids(matching_indices_short)
     traj_long.reduce_to_ids(matching_indices_long)
 
@@ -104,10 +109,9 @@ def associate_trajectories(
     if num_matches == 0:
         raise SyncException(
             "found no matching timestamps between {} and {} with max. time "
-            "diff {} (s) and time offset {} (s)".format(
-                first_name, snd_name, max_diff, offset_2))
+            "diff {} (s) and time offset {} (s)".format(first_name, snd_name, max_diff, offset_2))
 
-    logger.debug(
+    logger.info(
         "Found {} of max. {} possible matching timestamps between...\n"
         "\t{}\nand:\t{}\n..with max. time diff.: {} (s) "
         "and time offset: {} (s).".format(num_matches, max_pairs, first_name,
