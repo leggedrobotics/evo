@@ -12,6 +12,7 @@ from evo.core.metrics import PoseRelation
 from evo.core.metrics import Unit
 import evo.common_ape_rpe as common
 from evo.tools.settings import SETTINGS
+from evo.tools import file_interface
 
 # temporarily override some package settings
 SETTINGS.plot_figsize = [12, 8]
@@ -71,9 +72,15 @@ def run_ate(args):
     fig = plt.figure()
     ax = plot.prepare_axis(fig, plot.PlotMode.xyz)
     plot.traj(ax, plot.PlotMode.xyz, traj_ref, style="--", alpha=0.5)
-    plot.traj_colormap(
+    # plot.traj_colormap(
+    #     ax, result.trajectories[est_name], result.np_arrays["error_array"], plot.PlotMode.xyz,
+    #     min_map=result.stats["min"], max_map=result.stats["max"])
+    
+    plot.custom_traj_colormap(
         ax, result.trajectories[est_name], result.np_arrays["error_array"], plot.PlotMode.xyz,
-        min_map=result.stats["min"], max_map=result.stats["max"])
+        min_map=result.stats["min"], max_map=result.stats["max"], motion_threshold = 1.0)
+
+
 
 
     file_interface.save_res_file(base_path + "/ate_results" + test_name+ ".zip", results[0],
@@ -127,4 +134,13 @@ if __name__ == "__main__":
         help="Base path of the data"
     )
     args = parser.parse_args()
+
+
+    from rosbags.rosbag1 import Reader as Rosbag1Reader
+    bag = Rosbag1Reader("/home/ttuna/Videos/dlio_verification/2024-11-02-19-47-44_jetson_ap20_synced.bag")  # type: ignore
+    bag.open()
+    traj_ref = file_interface.read_bag_trajectory(bag, "/gt_box/ap20/prism_position_odometry", cache_tf_tree=True)
+    bag.close()
+
+
     run_ate(args)
